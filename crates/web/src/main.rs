@@ -9,22 +9,63 @@ fn main() {
     leptos::mount::mount_to_body(App);
 }
 
+#[derive(Clone, PartialEq)]
+enum CameraState {
+    Idle,
+    Requesting,
+    Active,
+    Error(String),
+}
+
+impl CameraState {
+    fn status_text(&self) -> String {
+        match self {
+            CameraState::Idle => "idle — click \"Start camera\"".to_string(),
+            CameraState::Requesting => {
+                "requesting camera access… look for a permission prompt".to_string()
+            }
+            CameraState::Active => "camera active".to_string(),
+            CameraState::Error(e) => format!("error — {e}"),
+        }
+    }
+}
+
 #[component]
 fn App() -> impl IntoView {
     let video_ref = NodeRef::<Video>::new();
-    let (error, set_error) = signal(None::<String>);
+    let (state, set_state) = signal(CameraState::Idle);
 
     let start_camera = move |_| {
-        set_error.set(None);
+        set_state.set(CameraState::Requesting);
         wasm_bindgen_futures::spawn_local(async move {
-            match request_camera_stream().await {
-                Ok(stream) => {
-                    if let Some(video) = video_ref.get() {
-                        video.set_src_object(Some(&stream));
-                    }
+            let Some(video) = video_ref.get_untracked() else {
+                set_state.set(CameraState::Error(
+                    "video element not ready — reload the page and try again".to_string(),
+                ));
+                return;
+            };
+
+            let stream = match request_camera_stream().await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    set_state.set(CameraState::Error(e));
+                    return;
                 }
-                Err(e) => set_error.set(Some(e)),
+            };
+
+            video.set_src_object(Some(&stream));
+            let play_result = match video.play() {
+                Ok(promise) => JsFuture::from(promise).await,
+                Err(e) => Err(e),
+            };
+            if let Err(e) = play_result {
+                set_state.set(CameraState::Error(format!(
+                    "camera stream attached but playback failed: {e:?}"
+                )));
+                return;
             }
+
+            set_state.set(CameraState::Active);
         });
     };
 
@@ -33,12 +74,11 @@ fn App() -> impl IntoView {
             <h1>"delinea"</h1>
             <p>"Camera-to-D2 live diagramming — point a camera at a hand-drawn diagram."</p>
             <button on:click=start_camera>"Start camera"</button>
-            {move || {
-                error.get().map(|e| view! { <p style="color: red">{e}</p> })
-            }}
+            <p>"Status: " {move || state.get().status_text()}</p>
             <video
                 node_ref=video_ref
                 autoplay=true
+                muted=true
                 playsinline=true
                 style="max-width: 640px; display: block; margin-top: 1rem; background: #222;"
             ></video>
