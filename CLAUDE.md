@@ -11,12 +11,14 @@ plus a rendered preview image. The entire pipeline — camera capture, CV
 shape detection, OCR, D2 codegen, and D2→SVG rendering — runs client-side in
 WASM; no frame is ever uploaded to a server.
 
-**Current status**: early scaffold (M0 done, M1 and M3 started). The
-`vision` and `d2gen` crates exist with a real (if minimal) first pipeline
-stage and are unit-tested; `web` requests camera access and shows the live
-feed in a `<video>` element, but nothing analyzes the frames yet — canvas
-frame grabbing, shape classification, OCR, and D2 rendering are not
-implemented. See "Milestones" below for what's next.
+**Current status**: early scaffold (M0 done, M1 and M3 started). `vision`
+classifies contours into rectangle/circle/diamond shapes with noise
+filtering (tested natively, including noisy synthetic scenes) and `d2gen`
+turns a `Diagram` into D2 text; both are unit-tested but **not wired into
+`web` yet** — `web` requests camera access and shows the live feed in a
+`<video>` element, but nothing calls `vision`/`d2gen` on its frames, so the
+app produces no diagram output yet. Canvas frame grabbing, arrow/connector
+detection, OCR, and D2 rendering are not implemented. See "Milestones" below.
 
 ## Commands
 
@@ -35,7 +37,7 @@ cd crates/web && trunk build
 cd crates/web && trunk serve   # dev server with live reload, no Axum needed
 
 # Run a single test
-cargo test -p vision finds_a_single_rectangle_contour
+cargo test -p vision detects_correct_shapes_in_a_noisy_realistic_scene
 cargo test -p d2gen renders_shapes_and_a_directed_labeled_edge
 
 # Serve the production build via the Rust server (run from repo root, after
@@ -68,17 +70,30 @@ Takes a raw RGBA/grayscale frame (handed in by `web` from a canvas
 `Diagram { nodes, edges }` (see `crates/vision/src/model.rs`):
 
 1. Grayscale + binarize (`imageproc::contrast::threshold`).
-2. Contour extraction (`imageproc::contours::find_contours`) — **implemented**
-   in `crates/vision/src/pipeline.rs::find_shape_regions`, returns bounding
-   boxes of candidate regions. This is the only pipeline stage that exists so
-   far.
-3. *(not yet implemented)* Shape classification from the contour polygon:
-   vertex count + angle + aspect ratio + fill ratio distinguishes
-   rectangle/diamond/circle (closed, filled-ish) from line/arrow (thin, open,
-   elongated). Arrowhead = small triangular cap at one end, used for edge
-   direction.
-4. *(not yet implemented)* Edge-to-shape association: match each line's
-   endpoints to the nearest shape bounding boxes to build a graph edge.
+2. Contour extraction (`imageproc::contours::find_contours`).
+3. **Implemented**: shape classification in
+   `crates/vision/src/pipeline.rs::classify_contour`, by *solidity* (contour
+   polygon area via the shoelace formula, divided by bounding-box area) —
+   analytically well-separated bands for the three recognized shapes when
+   filled: rectangle (axis-aligned) ~1.0, circle ~π/4 ≈ 0.785, diamond
+   (bbox-inscribed rhombus) ~0.5. A minimum-area threshold drops speckle/dust
+   noise; a maximum-area-fraction-of-frame threshold drops a traced
+   background/border. Contours outside all bands or size bounds are discarded
+   as `Classification::Noise`, not added to the diagram — this is what keeps
+   whiteboard glare, texture, and stray marks from becoming spurious nodes.
+   `detect_shapes(&GrayImage) -> Vec<ShapeCandidate>` runs the full
+   binarize→contour→classify pipeline; `build_diagram(&GrayImage) -> Diagram`
+   wraps that into diagram nodes (no labels, no edges yet). Tested with
+   procedurally-generated fixtures, including scenes combining multiple
+   shapes with scattered noise speckles and a near-full-frame border — not
+   just clean single-shape images. **Known gap**: these are synthetic
+   fixtures, not real photos; real whiteboard-photo fixtures in
+   `tests/fixtures/` would be a valuable follow-up validation pass.
+4. *(not yet implemented)* Line/arrow detection and edge-to-shape
+   association: distinguish thin/open/elongated contours (lines) from the
+   closed shapes above, detect an arrowhead (small triangular cap) for
+   direction, and match endpoints to the nearest shape bounding boxes to
+   build a graph edge.
 5. *(not yet implemented)* OCR: crop each shape's interior and run `ocrs`
    (pure-Rust OCR via the `rten` ONNX runtime — confirmed to build for
    `wasm32-unknown-unknown`) to get its label.
@@ -123,12 +138,14 @@ runs server-side — all recognition stays client-side per the design above.
 
 - **M0 — scaffold** (done): workspace, four crates compiling, CI, Leptos
   hello-world served by Axum.
-- **M1 — offline vision pipeline** (in progress): shape+contour detection
-  against fixture images (no camera yet), verified with plain `cargo test`.
-  Contour extraction is implemented; shape classification, arrow detection,
-  and fixture images with golden D2 output are not yet added. This is the
-  highest-risk part algorithmically — get it right before touching
-  WASM/camera plumbing.
+- **M1 — offline vision pipeline** (in progress): contour extraction and
+  shape classification (rectangle/circle/diamond, with noise filtering) are
+  implemented and tested against procedural fixtures, including noisy scenes
+  — see `vision`'s `detect_shapes`/`build_diagram` above. Still missing:
+  arrow/connector detection, real-photo fixtures (only synthetic images
+  tested so far), and golden D2 output tests. Deliberately not yet wired
+  into `web`/the GUI — the user chose to get classification solid first
+  rather than wire a naive/noisy pipeline into the UI early.
 - **M2 — OCR**: integrate `ocrs` into the same offline pipeline/fixtures.
 - **M3 — live camera wiring** (in progress): camera capture is done (`web`
   requests `getUserMedia` and shows the live feed); canvas frame grab, the
