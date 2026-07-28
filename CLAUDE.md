@@ -11,10 +11,12 @@ plus a rendered preview image. The entire pipeline — camera capture, CV
 shape detection, OCR, D2 codegen, and D2→SVG rendering — runs client-side in
 WASM; no frame is ever uploaded to a server.
 
-**Current status**: early scaffold (M0 done, M1 started). The `vision` and
-`d2gen` crates exist with a real (if minimal) first pipeline stage and are
-unit-tested; the live camera loop, full shape classification, OCR, and D2
-rendering are not implemented yet. See "Milestones" below for what's next.
+**Current status**: early scaffold (M0 done, M1 and M3 started). The
+`vision` and `d2gen` crates exist with a real (if minimal) first pipeline
+stage and are unit-tested; `web` requests camera access and shows the live
+feed in a `<video>` element, but nothing analyzes the frames yet — canvas
+frame grabbing, shape classification, OCR, and D2 rendering are not
+implemented. See "Milestones" below for what's next.
 
 ## Commands
 
@@ -90,17 +92,18 @@ no image/CV concerns. Shapes map to D2's `shape:` keyword; edges map to
 
 ### `web` — Leptos CSR frontend
 
-Not yet wired to `vision`/`d2gen` — currently a hello-world Leptos app
-(`crates/web/src/main.rs`) built with Trunk (`crates/web/index.html`).
+Not yet wired to `vision`/`d2gen`. Currently (`crates/web/src/main.rs`,
+built with Trunk via `crates/web/index.html`): a "Start camera" button calls
+`getUserMedia` and streams the result into a `<video>` element — real camera
+capture, but nothing reads the frames yet.
 
-Planned design (see the plan in `.claude/plans` history, or M3/M4 below) for
-when the camera loop lands: `getUserMedia` → `<video>`, a hidden `<canvas>`
-grabs frames, and **two processing speeds** run concurrently — lightweight
-contour detection at ~5fps for a live bounding-box overlay (so the user gets
-instant feedback), while the expensive OCR + full D2 regeneration only runs
-every ~1s or on an explicit "capture" action. Running OCR at video framerate
-is not viable — this two-speed split is a deliberate perf decision, not an
-implementation shortcut to skip later.
+Still to build: a hidden `<canvas>` to grab frames from the video, and **two
+processing speeds** running concurrently — lightweight contour detection at
+~5fps for a live bounding-box overlay (so the user gets instant feedback),
+while the expensive OCR + full D2 regeneration only runs every ~1s or on an
+explicit "capture" action. Running OCR at video framerate is not viable —
+this two-speed split is a deliberate perf decision, not an implementation
+shortcut to skip later.
 
 D2→image rendering will call into `@terrastruct/d2` ("d2.js"), Terrastruct's
 official WASM build of the D2 compiler, via a thin JS interop shim (planned:
@@ -127,9 +130,10 @@ runs server-side — all recognition stays client-side per the design above.
   highest-risk part algorithmically — get it right before touching
   WASM/camera plumbing.
 - **M2 — OCR**: integrate `ocrs` into the same offline pipeline/fixtures.
-- **M3 — live camera wiring**: camera capture, canvas frame grab, the
-  two-speed processing loop, live shape overlay, live-updating D2 text panel
-  — reusing `vision`/`d2gen` as-is.
+- **M3 — live camera wiring** (in progress): camera capture is done (`web`
+  requests `getUserMedia` and shows the live feed); canvas frame grab, the
+  two-speed processing loop, live shape overlay, and live-updating D2 text
+  panel are not yet built — reusing `vision`/`d2gen` as-is once they are.
 - **M4 — D2 rendering + export**: JS interop to `@terrastruct/d2` for a live
   SVG preview; "Export D2 source" / "Export image" actions.
 - **M5 — polish & deploy**: handle empty/low-confidence detections,
