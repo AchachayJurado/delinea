@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 console_error_panic_hook = "0.1.7"
 leptos = { version = "0.8.3", features = ["csr"] }
+wasm-bindgen = "0.2.126"
+wasm-bindgen-futures = "0.4.76"
+web-sys = { version = "0.3.103", features = ["MediaDevices", "MediaStreamConstraints", "MediaStream", "HtmlVideoElement", "Navigator", "Window", "console"] }
